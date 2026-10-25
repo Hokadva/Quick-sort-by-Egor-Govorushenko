@@ -8,8 +8,8 @@ NUM_OF_MEDIAN_CANDIDATES = 3
 
 
 def my_sort(
-        array: list, reverse: bool=False,
-        key: Optional[Callable]=None, cmp: Optional[Callable]=None) -> list:
+        array: list, reverse: bool=False, key: Optional[Callable]=None,
+        cmp: Optional[Callable]=None) -> list:
     """
     A quick erase option that takes a pivot of 5 (NUM_OF_MEDIAN_CANDIDATES - const)
     array elements whose numbers are - 0 1 2 3 4 (calculated using the formula:
