@@ -74,17 +74,17 @@ def visualize_my_sort(array: list, reverse: bool, offset: int = 0) -> tuple[list
         else:
             hg_elements.append(element)
 
-    for i, element in enumerate(lw_elements):
-        offsets.append((element, OffsetTypes.LOW.value, offset + i))
-
-    for i, element in enumerate(eq_elements):
-        offsets.append((element, OffsetTypes.CENTER.value,
-            offset + len(lw_elements) + i))
-
-    for i, element in enumerate(hg_elements):
-        offsets.append(
-            (element, OffsetTypes.HIGH.value, offset +
-             len(lw_elements) + len(eq_elements) + i))
+    for element in array:
+        if element in lw_elements:
+            offsets.append((element, OffsetTypes.LOW, offset))
+        elif element in eq_elements:
+            offsets.append(
+                (element, OffsetTypes.CENTER, offset + len(lw_elements)))
+        else:
+            offsets.append(
+                (element, OffsetTypes.HIGH, offset + len(lw_elements) +
+                 len(eq_elements))
+            )
 
     lw_answer = visualize_my_sort(lw_elements, reverse, offset)
     hg_answer = visualize_my_sort(
@@ -93,95 +93,68 @@ def visualize_my_sort(array: list, reverse: bool, offset: int = 0) -> tuple[list
     answer = lw_answer[0] + eq_elements + hg_answer[0]
     current_highlight += lw_answer[1] + hg_answer[1]
     offsets += lw_answer[2] + hg_answer[2]
-    print((answer, current_highlight, offsets))
     return (answer, current_highlight, offsets)
 
 
 class SortThread(QThread):
-    # 4-й аргумент - int (для пивота)
-    step_signal = pyqtSignal(list, list, int, list, list) 
-    finished_signal = pyqtSignal(list)
+    step_signal = pyqtSignal(tuple, tuple, tuple, list, list)
+    finished_signal = pyqtSignal()
 
-    def __init__(self, array: list, delay: float, reverse: bool = False):
+    def __init__(self, array: list, delay: float):
         super().__init__()
         self.array = array
+        self.new_array = array
+        self.sorted_array, self.highlights, self.offsets = visualize_my_sort(self.array)
         self.delay = delay
-        self.reverse = reverse
         self.is_paused = False
 
     def run(self):
-        sorted_array, highlights, offsets = visualize_my_sort(self.array, self.reverse)
-        
-        global_state = self.array[:] 
-        
-        # Нижний массив изначально пустой (None), чтобы рисовать только добавленные элементы
-        local_state = [None] * len(self.array)
-        
-        offset_idx = 0
-        current_pivot_value = None 
-        
-        for idx, (h_idx, h_type) in enumerate(highlights):
-            current_highlights_bottom = []
-            current_highlights_top = []
+        idof = 0
+        for idx, el in enumerate(self.highlights):
+            current_highlight = self.highlights[idx]
+            if (current_highlight[1] == HighlightTypes.CANDIDATE or
+                current_highlight[1] == HighlightTypes.PIVOT):
+                current_pivot = current_highlight
+                current_highlight = ()
+                current_offset = ()
+                current_state_up = self.new_array
+                current_state_down = self.new_array
+                if current_highlight[1] == HighlightTypes.PIVOT:
+                    for idh in range(idx, len(self.highlights)): #idh - idx - число
+                        #элементов которые необходимо ликвидировать
+                        if (self.highlights[idh] == HighlightTypes.CANDIDATE
+                            or self.highlights[idh] == HighlightTypes.PIVOT):
+                            break
 
-            # --- Логика для верхнего графика ---
-            if h_type == HighlightTypes.PIVOT:
-                current_pivot_value = global_state[h_idx]
-                current_highlights_top = [(h_idx, HighlightTypes.ELEMENT)]
+                    for _ in range(idh - idx):
+                        current_state_down.pop(self.offsets[idof + 1][2])
+
             else:
-                current_highlights_top = [(h_idx, HighlightTypes.ELEMENT)]
+                current_offset = self.offsets[idof]
+                idof += 1
+                current_state_up = self.new_array
+                current_state_down.append(current_offset[idof][0])
+                if idx + 1 < len(self.highlights) and (
+                    self.highlights[idx + 1][1] == HighlightTypes.CANDIDATE or
+                    self.highlights[idx + 1][1] == HighlightTypes.PIVOT):
+                    self.new_array = current_state_down
 
-            # --- Логика для нижнего графика ---
-            if h_type == HighlightTypes.ELEMENT and offset_idx < len(offsets):
-                value, group_type, target_idx = offsets[offset_idx]
-                
-                # Просто ставим значение на заранее вычисленное место
-                if 0 <= target_idx < len(local_state):
-                    local_state[target_idx] = value
-                    current_highlights_bottom = [(target_idx, group_type)]
-                
-                offset_idx += 1
-
-            # Ищем, где сейчас находится текущий пивот на верхнем графике
-            pivot_idx = -1
-            if current_pivot_value is not None:
-                try:
-                    pivot_idx = global_state.index(current_pivot_value)
-                except ValueError:
-                    pass
-
-            self.step_signal.emit(
-                global_state[:], 
-                local_state[:], 
-                pivot_idx, 
-                current_highlights_top, 
-                current_highlights_bottom
-            )
-            
+            self.step_signal.emit(current_highlight, current_pivot,
+                                  current_offset, current_state_up,
+                                  current_state_down)
             time.sleep(self.delay)
-            while self.is_paused:
-                time.sleep(0.1)
 
-            # --- Конец текущего куска ---
-            if h_type == HighlightTypes.PIVOT or idx == len(highlights) - 1:
-                # Переносим всё, что насобирали в нижнем графике, наверх
-                for i in range(len(global_state)):
-                    if local_state[i] is not None:
-                        global_state[i] = local_state[i]
-                
-                # Очищаем нижний график для следующего подмассива
-                local_state = [None] * len(self.array)
-
-        self.finished_signal.emit(sorted_array)
+        self.finished_signal.emit()
 
 
 class SortVisualizerWidget(QWidget):
+    """Базовый виджет с двумя графиками."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.figure = Figure(figsize=(8, 6), dpi=100)
         self.canvas = FigureCanvas(self.figure)
-        
+
         self.ax_top = self.figure.add_subplot(211)
         self.ax_bottom = self.figure.add_subplot(212)
 
@@ -189,72 +162,31 @@ class SortVisualizerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
-        self.ax_top.set_title("Global State")
-        self.ax_bottom.set_title("Local State (Current Processing)")
-
-    def update_plot(self, top_array, bottom_array, pivot_idx,
-                    top_highlights, bottom_highlights,
-                    min_val: int = 0, max_val: int = 100):
-        
+    def update_plot(
+            self, top_array, bottom_array):
+        """Рисует верхний и нижний графики с переданными цветами."""
         self.ax_top.clear()
         self.ax_bottom.clear()
         self.ax_top.set_xticks([])
         self.ax_bottom.set_xticks([])
 
-        # --- Верхний график ---
-        top_colors = ['skyblue'] * len(top_array)
-        
-        if isinstance(pivot_idx, int) and 0 <= pivot_idx < len(top_colors):
-            top_colors[pivot_idx] = HighlightTypes.PIVOT.value
-            
-        for idx, h_type in top_highlights:
-            if 0 <= idx < len(top_colors):
-                if top_colors[idx] != HighlightTypes.PIVOT.value:
-                    top_colors[idx] = h_type.value
+        self.ax_top.bar(range(len(top_array)), top_array)
 
-        self.ax_top.bar(range(len(top_array)), top_array, color=top_colors)
-
-        # --- Нижний график ---
-        # Заменяем None на 0 для отрисовки
         display_bottom = [0 if x is None else x for x in bottom_array]
-        
-        # По умолчанию все столбики прозрачные/серые (пустые)
-        bottom_colors = ['lightgray'] * len(display_bottom)
-        
-        for idx, h_type in bottom_highlights:
-            if 0 <= idx < len(bottom_colors):
-                if h_type == OffsetTypes.LOW.value:
-                    bottom_colors[idx] = 'blue'
-                elif h_type == OffsetTypes.CENTER.value:
-                    bottom_colors[idx] = 'orange'
-                elif h_type == OffsetTypes.HIGH.value:
-                    bottom_colors[idx] = 'purple'
-                else:
-                    bottom_colors[idx] = 'green'
+        self.ax_bottom.bar(range(len(display_bottom)), display_bottom)
 
-        self.ax_bottom.bar(range(len(display_bottom)), display_bottom, color=bottom_colors)
-
-        # Настройка Y
-        if top_array:
-            padding = max(10, (max_val - min_val) * 0.1)
-            self.ax_top.set_ylim(min_val - padding, max_val + padding)
-            self.ax_bottom.set_ylim(min_val - padding, max_val + padding)
-        
         self.canvas.draw()
 
 
-# ==========================================
-# 4. Главное окно
-# ==========================================
 class MainWindow(QMainWindow):
     MAX_ARRAY_SIZE = 10000
-    DELAY = 50
+    BASE_DELAY = 4
 
     def __init__(self):
         super().__init__()
         self.sort_thread = None
         self._create_ui()
-        self.start_sorting()
+        self.restart_sorting()
 
     def _create_ui(self):
         self.setWindowTitle("Sorting array")
@@ -263,7 +195,6 @@ class MainWindow(QMainWindow):
         self.matplotlib_widget = SortVisualizerWidget()
         main_layout.addWidget(self.matplotlib_widget)
 
-        # Настройки
         min_range_label = QLabel("Minimum possible value:")
         self.min_range = QSpinBox()
         self.min_range.setMaximum(10000)
@@ -294,10 +225,19 @@ class MainWindow(QMainWindow):
         array_size_layout.addWidget(self.array_size)
         main_layout.addLayout(array_size_layout)
 
+        speed_label = QLabel("Speed:")
+        self.speed_edit = QSpinBox(self)
+        self.speed_edit.setMaximum(50)
+        self.speed_edit.setValue(25)
+        self.speed_edit.setMinimum(1)
+        speed_layout = QHBoxLayout()
+        speed_layout.addWidget(speed_label)
+        speed_layout.addWidget(self.speed_edit)
+        main_layout.addLayout(speed_layout)
+
         self.reverse = QCheckBox("Sorting in reverse order")
         main_layout.addWidget(self.reverse)
 
-        # Кнопки
         self.start_button = QPushButton("start", self)
         self.start_button.clicked.connect(self.start_sorting)
         self.pause_button = QPushButton("pause", self)
@@ -317,68 +257,48 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
     def start_sorting(self):
-        if self.sort_thread is not None and self.sort_thread.isRunning():
-            return
+        self.sort_thread = SortThread(
+            self.original_array, delay=self.BASE_DELAY // self.speed)
+        self.sort_thread.step_signal.connect(self.on_step)
+        self.sort_thread.finished_signal.connect(self.on_finished)
 
+        self.sort_thread.start()
         self.start_button.setEnabled(False)
         self.pause_button.setEnabled(True)
-        
-        delay = max(0.005, self.DELAY / self.size_val)
-        
-        original_array = [randint(self.min_val, self.max_val)
-            for _ in range(self.size_val)]
 
-        # ИСПРАВЛЕНИЕ: вместо [] ставим -1
-        self.matplotlib_widget.update_plot(
-            original_array, 
-            original_array,
-            -1,  # pivot_idx (нет активного пивота)
-            [],  # top_highlights
-            [],  # bottom_highlights
-            min_val=self.min_val, 
-            max_val=self.max_val
-        )
+    def on_step(self, current_highlight, current_pivot, current_offset,
+                current_state_up, current_state_down):
+        self.matplotlib_widget.update_plot(current_highlight, current_pivot,
+                                           current_offset, current_state_up,
+                                           current_state_up)
 
-        self.sort_thread = SortThread(
-            original_array[:],
-            delay, self.is_reverse
-        )
-        self.sort_thread.step_signal.connect(self.on_step)
-        self.sort_thread.finished_signal.connect(self.on_finish)
-        self.sort_thread.start()
-
-    def on_step(self, top_array, bottom_array, pivot_idx, top_hl, bottom_hl):
-        self.matplotlib_widget.update_plot(
-            top_array, bottom_array, pivot_idx,
-            top_hl, bottom_hl,
-            min_val=self.min_val,
-            max_val=self.max_val
-        )
-
-    def on_finish(self, result):
-        self.matplotlib_widget.update_plot(
-            result, result, -1,  # -1 означает, что нет активного пивота
-            [], [],
-            min_val=self.min_val,
-            max_val=self.max_val
-        )
-        self.start_button.setEnabled(True)
-        self.pause_button.setEnabled(False)
+    def on_finished(self):
+        print("Сортировка завершена!")
 
     def toggle_pause(self):
         if self.sort_thread:
             self.sort_thread.is_paused = not self.sort_thread.is_paused
             self.pause_button.setText(
-                "resume" if self.sort_thread.is_paused else "pause")
+                "Resume" if self.sort_thread.is_paused else "Pause")
 
-    def restart_sorting(self):
-        if self.sort_thread and self.sort_thread.isRunning():
-            self.sort_thread.terminate()
-            self.sort_thread.wait()
-        
+    def stop_sorting(self):
+        self.sort_thread.is_stopped = True
+        self.sort_thread.is_paused = False
+
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
-        self.start_sorting()
+        self.stop_button.setEnabled(False)
+
+    def restart_sorting(self):
+        self.original_array = [
+            randint(self.min_val, self.max_val) for _ in range(self.size_val)]
+        self.matplotlib_widget.update_plot(self.original_array, [])
+        self.start_button.setEnabled(True)
+        self.pause_button.setEnabled(False)
+
+    @property
+    def speed(self):
+        return self.speed_edit.value()
 
     @property
     def min_val(self):
