@@ -5,6 +5,7 @@ from typing import Optional, Callable
 
 
 NUM_OF_MEDIAN_CANDIDATES = 3
+MIN_ARRAY_SIZE = 1000
 
 
 def my_sort(
@@ -32,7 +33,7 @@ def my_sort(
     if arr_len == 1:
         return array
 
-    if (arr_len < 10000 or
+    if (arr_len < MIN_ARRAY_SIZE or
         arr_len <= NUM_OF_MEDIAN_CANDIDATES or NUM_OF_MEDIAN_CANDIDATES == 1):
         pivot = array[arr_len // 2]
 
@@ -64,4 +65,3 @@ def my_sort(
 
     return (my_sort(lw_elements, reverse, key, cmp)
             + eq_elements + my_sort(hg_elements, reverse, key, cmp))
-

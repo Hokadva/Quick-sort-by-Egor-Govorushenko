@@ -9,8 +9,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from enum import Enum
 from random import randint
-from typing import Callable
-from my_sort import NUM_OF_MEDIAN_CANDIDATES
+import threading
+from my_sort import NUM_OF_MEDIAN_CANDIDATES, MIN_ARRAY_SIZE
 
 
 class OffsetTypes(Enum):
@@ -25,7 +25,8 @@ class HighlightTypes(Enum):
     ELEMENT = "green"
 
 
-def visualize_my_sort(array: list, reverse: bool, offset: int = 0) -> tuple[list, list, list]:
+def visualize_my_sort(
+        array: list, reverse: bool, offset: int = 0) -> tuple[list, list, list]:
     current_highlight = []
     offsets = []
     
@@ -36,7 +37,7 @@ def visualize_my_sort(array: list, reverse: bool, offset: int = 0) -> tuple[list
     if arr_len == 1:
         return (array, [], [])
 
-    if (arr_len < 10000 or
+    if (arr_len < MIN_ARRAY_SIZE or
         arr_len <= NUM_OF_MEDIAN_CANDIDATES or NUM_OF_MEDIAN_CANDIDATES == 1):
         pivot = array[arr_len // 2]
         pivot_idx = arr_len // 2
@@ -63,28 +64,35 @@ def visualize_my_sort(array: list, reverse: bool, offset: int = 0) -> tuple[list
     lw_elements = []
     eq_elements = []
     hg_elements = []
+    right_limits = []
 
     for idx, element in enumerate(array):
         current_highlight.append((idx + offset, HighlightTypes.ELEMENT))
 
         if element == pivot:
             eq_elements.append(element)
+            right_limits.append(offset + len(lw_elements) + len(eq_elements))
         elif (element < pivot) ^ reverse:
             lw_elements.append(element)
+            right_limits.append(offset + len(lw_elements))
         else:
             hg_elements.append(element)
+            right_limits.append(
+                offset + len(lw_elements) + len(hg_elements) + len(eq_elements))
 
-    for element in array:
+    for idx, element in enumerate(array):
         if element in lw_elements:
-            offsets.append((element, OffsetTypes.LOW, offset))
+            offsets.append((element, OffsetTypes.LOW, offset,
+                            right_limits[idx]))
         elif element in eq_elements:
             offsets.append(
-                (element, OffsetTypes.CENTER, offset + len(lw_elements)))
+                (element, OffsetTypes.CENTER,
+                 offset + len(lw_elements) - 1, right_limits[idx]))
         else:
             offsets.append(
-                (element, OffsetTypes.HIGH, offset + len(lw_elements) +
-                 len(eq_elements))
-            )
+                (element, OffsetTypes.HIGH, 
+                 offset + len(lw_elements) + len(eq_elements) - 2,
+                 right_limits[idx]))
 
     lw_answer = visualize_my_sort(lw_elements, reverse, offset)
     hg_answer = visualize_my_sort(
@@ -100,61 +108,106 @@ class SortThread(QThread):
     step_signal = pyqtSignal(tuple, tuple, tuple, list, list)
     finished_signal = pyqtSignal()
 
-    def __init__(self, array: list, delay: float):
+    def __init__(self, array: list, delay: float, reverse: bool):
         super().__init__()
         self.array = array
-        self.new_array = array
-        self.sorted_array, self.highlights, self.offsets = visualize_my_sort(self.array)
+        self.new_array = array[:]
+        self.sorted_array, self.highlights, self.offsets = visualize_my_sort(
+            self.array, reverse=reverse)
         self.delay = delay
-        self.is_paused = False
+        self.stride = max(1, len(array) // 100)
+
+        self._resume = threading.Event()
+        self._resume.set()
+        self._frame_done = threading.Event() 
+        self._frame_done.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._resume.is_set()
+
+    def pause(self):
+        self._resume.clear()
+
+    def resume(self):
+        self._resume.set()
+
+    def stop(self):
+        self.requestInterruption()
+        self._resume.set()
+        self._frame_done.set()
+
+    def frame_done(self):
+        self._frame_done.set()
+
+    def _wait(self, event: threading.Event) -> bool:
+        """Ждёт событие; False, если запросили остановку."""
+        while not event.wait(0.05):
+            if self.isInterruptionRequested():
+                return False
+        return not self.isInterruptionRequested()
 
     def run(self):
         idof = 0
-        for idx, el in enumerate(self.highlights):
-            current_highlight = self.highlights[idx]
-            if (current_highlight[1] == HighlightTypes.CANDIDATE or
-                current_highlight[1] == HighlightTypes.PIVOT):
+        element_counter = 0
+        current_pivot = ()
+        current_state_up = self.new_array[:]
+        current_state_down = self.new_array[:]
+        last_idx = len(self.highlights) - 1
+
+        for idx, current_highlight in enumerate(self.highlights):
+            if not self._wait(self._resume):
+                return
+
+            is_key_step = current_highlight[1] != HighlightTypes.ELEMENT
+
+            if is_key_step:
                 current_pivot = current_highlight
-                current_highlight = ()
                 current_offset = ()
-                current_state_up = self.new_array
-                current_state_down = self.new_array
+                current_state_up = self.new_array[:]
+                current_state_down = self.new_array[:]
                 if current_highlight[1] == HighlightTypes.PIVOT:
-                    for idh in range(idx, len(self.highlights)): #idh - idx - число
-                        #элементов которые необходимо ликвидировать
-                        if (self.highlights[idh] == HighlightTypes.CANDIDATE
-                            or self.highlights[idh] == HighlightTypes.PIVOT):
+                    for idh in range(idx + 1, len(self.highlights)):
+                        if self.highlights[idh][1] != HighlightTypes.ELEMENT:
                             break
+                    else:
+                        idh = len(self.highlights)
 
-                    for _ in range(idh - idx):
-                        current_state_down.pop(self.offsets[idof + 1][2])
-
+                    seg_start = self.highlights[idx + 1][0]
+                    for _ in range(idh - idx - 1):
+                        current_state_down.pop(seg_start)
             else:
                 current_offset = self.offsets[idof]
                 idof += 1
-                current_state_up = self.new_array
-                current_state_down.append(current_offset[idof][0])
+                current_state_down.insert(
+                    current_offset[3] - 1, current_offset[0])
                 if idx + 1 < len(self.highlights) and (
-                    self.highlights[idx + 1][1] == HighlightTypes.CANDIDATE or
-                    self.highlights[idx + 1][1] == HighlightTypes.PIVOT):
-                    self.new_array = current_state_down
+                        self.highlights[idx + 1][1] != HighlightTypes.ELEMENT):
+                    self.new_array = current_state_down[:]
+                element_counter += 1
 
+            if not (is_key_step or idx == last_idx
+                    or element_counter % self.stride == 0):
+                continue
+
+            if not self._wait(self._frame_done): 
+                return
+            self._frame_done.clear()
             self.step_signal.emit(current_highlight, current_pivot,
-                                  current_offset, current_state_up,
-                                  current_state_down)
-            time.sleep(self.delay)
+                                  current_offset, current_state_up[:],
+                                  current_state_down[:])
+            self.msleep(int(self.delay * 1000))
 
         self.finished_signal.emit()
 
 
 class SortVisualizerWidget(QWidget):
-    """Базовый виджет с двумя графиками."""
+    """Виджет с двумя графиками."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.figure = Figure(figsize=(8, 6), dpi=100)
         self.canvas = FigureCanvas(self.figure)
-
         self.ax_top = self.figure.add_subplot(211)
         self.ax_bottom = self.figure.add_subplot(212)
 
@@ -162,24 +215,73 @@ class SortVisualizerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.canvas)
 
-    def update_plot(
-            self, top_array, bottom_array):
-        """Рисует верхний и нижний графики с переданными цветами."""
-        self.ax_top.clear()
-        self.ax_bottom.clear()
-        self.ax_top.set_xticks([])
-        self.ax_bottom.set_xticks([])
+    def update_size(self, min_val: int, max_val: int, arr_len: int):
+        self._arr_len = arr_len
+        self._min_val = min_val
+        self._max_val = max_val
 
-        self.ax_top.bar(range(len(top_array)), top_array)
+        for ax, title in ((self.ax_top, "Global State"),
+                          (self.ax_bottom, "Local State (Current Processing)")):
+            ax.clear()
+            ax.set_title(title)
+            ax.set_xticks([])
+            ax.set_xlim(-1, arr_len)
+            ax.set_ylim(min_val, max_val)
+
+        self.top_bars = self.ax_top.bar(
+            range(arr_len), [0] * arr_len, linewidth=0)
+        self.bottom_bars = self.ax_bottom.bar(
+            range(arr_len), [0] * arr_len, linewidth=0)
+        self._top_cache = [None] * arr_len
+        self._bottom_cache = [None] * arr_len
+
+    @staticmethod
+    def _apply(bars, heights, colors, cache):
+        """Меняет только те столбцы, которые изменились."""
+        for i, rect in enumerate(bars):
+            h = heights[i] if i < len(heights) else 0
+            c = colors[i] if i < len(colors) else 'lightgray'
+            if cache[i] != (h, c):
+                rect.set_height(h)
+                rect.set_facecolor(c)
+                cache[i] = (h, c)
+
+    def update_plot(self, current_highlight: tuple, current_pivot: tuple,
+                    current_offset: tuple, top_array: list, bottom_array: list):
+        top_colors = ['skyblue'] * len(top_array)
+        if current_highlight:
+            h_idx, h_type = current_highlight
+            if 0 <= h_idx < len(top_colors):
+                top_colors[h_idx] = h_type.value
+        if current_pivot:
+            p_idx, p_type = current_pivot
+            if 0 <= p_idx < len(top_colors):
+                top_colors[p_idx] = p_type.value
 
         display_bottom = [0 if x is None else x for x in bottom_array]
-        self.ax_bottom.bar(range(len(display_bottom)), display_bottom)
+        bottom_colors = ['lightgray'] * len(display_bottom)
+        if current_offset:
+            value, group_type, _, __ = current_offset
+            color = {OffsetTypes.LOW: 'blue',
+                     OffsetTypes.CENTER: 'orange',
+                     OffsetTypes.HIGH: 'purple'}[group_type]
+            for i, x in enumerate(display_bottom):
+                if x == value and bottom_colors[i] == 'lightgray':
+                    bottom_colors[i] = color
+                    break
 
+        self._apply(self.top_bars, top_array, top_colors, self._top_cache)
+        self._apply(self.bottom_bars, display_bottom, bottom_colors,
+                    self._bottom_cache)
         self.canvas.draw()
 
 
 class MainWindow(QMainWindow):
-    MAX_ARRAY_SIZE = 10000
+    MAX_ARRAY_SIZE = 1000
+    MIN_RANGE = -10000
+    MAX_RANGE = 10000
+    MAX_SPEED = 200
+    MIN_SPEED = 1
     BASE_DELAY = 4
 
     def __init__(self):
@@ -197,8 +299,8 @@ class MainWindow(QMainWindow):
 
         min_range_label = QLabel("Minimum possible value:")
         self.min_range = QSpinBox()
-        self.min_range.setMaximum(10000)
-        self.min_range.setMinimum(-10000)
+        self.min_range.setMaximum(self.MAX_RANGE)
+        self.min_range.setMinimum(self.MIN_RANGE)
         self.min_range.setValue(-100)
         min_layout = QHBoxLayout()
         min_layout.addWidget(min_range_label)
@@ -207,8 +309,8 @@ class MainWindow(QMainWindow):
 
         max_range_label = QLabel("Maximum possible value:")
         self.max_range = QSpinBox()
-        self.max_range.setMaximum(10000)
-        self.max_range.setMinimum(-10000)
+        self.max_range.setMaximum(self.MAX_RANGE)
+        self.max_range.setMinimum(self.MIN_RANGE)
         self.max_range.setValue(100)
         max_layout = QHBoxLayout()
         max_layout.addWidget(max_range_label)
@@ -227,9 +329,9 @@ class MainWindow(QMainWindow):
 
         speed_label = QLabel("Speed:")
         self.speed_edit = QSpinBox(self)
-        self.speed_edit.setMaximum(50)
+        self.speed_edit.setMaximum(self.MAX_SPEED)
         self.speed_edit.setValue(25)
-        self.speed_edit.setMinimum(1)
+        self.speed_edit.setMinimum(self.MIN_SPEED)
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(speed_label)
         speed_layout.addWidget(self.speed_edit)
@@ -257,29 +359,54 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
     def start_sorting(self):
+        self._stop_thread()
         self.sort_thread = SortThread(
-            self.original_array, delay=self.BASE_DELAY // self.speed)
+            self.original_array, delay=self.BASE_DELAY / self.speed,
+            reverse=self.is_reverse)
         self.sort_thread.step_signal.connect(self.on_step)
         self.sort_thread.finished_signal.connect(self.on_finished)
-
         self.sort_thread.start()
+
         self.start_button.setEnabled(False)
         self.pause_button.setEnabled(True)
+        self.pause_button.setText("Pause")
 
     def on_step(self, current_highlight, current_pivot, current_offset,
                 current_state_up, current_state_down):
-        self.matplotlib_widget.update_plot(current_highlight, current_pivot,
-                                           current_offset, current_state_up,
-                                           current_state_up)
+        self.matplotlib_widget.update_plot(
+            current_highlight, current_pivot, current_offset,
+            current_state_up, current_state_down)
+        if self.sort_thread:
+            self.sort_thread.frame_done()
 
     def on_finished(self):
-        print("Сортировка завершена!")
+        self.start_button.setEnabled(True)
+        self.pause_button.setEnabled(False)
+        self.pause_button.setText("Pause")
 
     def toggle_pause(self):
-        if self.sort_thread:
-            self.sort_thread.is_paused = not self.sort_thread.is_paused
-            self.pause_button.setText(
-                "Resume" if self.sort_thread.is_paused else "Pause")
+        t = self.sort_thread
+        if not t or not t.isRunning():
+            return
+        if t.is_paused:
+            t.resume()
+            self.pause_button.setText("Pause")
+        else:
+            t.pause()
+            self.pause_button.setText("Resume")
+
+    def _stop_thread(self):
+        t = self.sort_thread
+        if t is None:
+            return
+        for sig in (t.step_signal, t.finished_signal):
+            try:
+                sig.disconnect()
+            except TypeError:
+                pass
+        t.stop()
+        t.wait()
+        self.sort_thread = None
 
     def stop_sorting(self):
         self.sort_thread.is_stopped = True
@@ -287,14 +414,22 @@ class MainWindow(QMainWindow):
 
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
 
     def restart_sorting(self):
+        self._stop_thread()
         self.original_array = [
             randint(self.min_val, self.max_val) for _ in range(self.size_val)]
-        self.matplotlib_widget.update_plot(self.original_array, [])
+        self.matplotlib_widget.update_size(
+            self.min_val, self.max_val, self.size_val)
+        self.matplotlib_widget.update_plot(
+            (), (), (), self.original_array, [])
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
+        self.pause_button.setText("Pause")
+
+    def closeEvent(self, event):
+        self._stop_thread()
+        super().closeEvent(event)
 
     @property
     def speed(self):
