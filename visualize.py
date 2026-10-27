@@ -1,25 +1,49 @@
+"""
+App that visualize my realisation of quick sort
+"""
+#pylint: disable=[E0401, E0611, R0914, R0912, C0103, R0917, R0913]
+#pylint: disable=[R0915, R0902, W0201]
 import sys
-import time
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QCheckBox,
-    QWidget, QPushButton, QHBoxLayout, QSpinBox, QLabel, QMessageBox
-)
-from PyQt6.QtCore import QThread, pyqtSignal
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+import threading
 from enum import Enum
 from random import randint
-import threading
-from my_sort import NUM_OF_MEDIAN_CANDIDATES, MIN_ARRAY_SIZE
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel,
+    QMainWindow, QPushButton, QSpinBox,
+    QVBoxLayout, QWidget)
+from matplotlib.backends.backend_qt5agg import \
+    FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+from my_sort import MIN_ARRAY_SIZE, NUM_OF_MEDIAN_CANDIDATES
 
 
 class OffsetTypes(Enum):
+    """
+    Enum class for offsets
+    """
     LOW = "low"
     CENTER = "center"
     HIGH = "high"
 
 
+class Colors(Enum):
+    """
+    Enum class for colors
+    """
+    SKY_BLUE = "skyblue"
+    LIGHT_GRAY = "lightgray"
+    BLUE = "blue"
+    ORANGE = "orange"
+    PURPLE = "purple"
+
+
+
 class HighlightTypes(Enum):
+    """
+    Enum class for highlights
+    """
     PIVOT = "red"
     CANDIDATE = "maroon"
     ELEMENT = "green"
@@ -27,12 +51,16 @@ class HighlightTypes(Enum):
 
 def visualize_my_sort(
         array: list, reverse: bool, offset: int = 0) -> tuple[list, list, list]:
+    """
+    Function that return sorted array, highlights changed elements and
+    offsets elements
+    """
     current_highlight = []
     offsets = []
-    
+
     if not array:
         return ([], [], [])
-    
+
     arr_len = len(array)
     if arr_len == 1:
         return (array, [], [])
@@ -49,7 +77,7 @@ def visualize_my_sort(
         current_highlight += [
             (idx + offset, HighlightTypes.CANDIDATE)
             for idx in range(len(candidates))]
-        
+
         for pivot in candidates:
             counter = 0
             for el in candidates:
@@ -57,8 +85,9 @@ def visualize_my_sort(
                 if counter > NUM_OF_MEDIAN_CANDIDATES // 2:
                     break
             if counter == NUM_OF_MEDIAN_CANDIDATES // 2:
+                pivot_idx = array.index(pivot)
                 break
-        pivot_idx = array.index(pivot) 
+
         current_highlight.append((pivot_idx + offset, HighlightTypes.PIVOT))
 
     lw_elements = []
@@ -90,7 +119,7 @@ def visualize_my_sort(
                  offset + len(lw_elements) - 1, right_limits[idx]))
         else:
             offsets.append(
-                (element, OffsetTypes.HIGH, 
+                (element, OffsetTypes.HIGH,
                  offset + len(lw_elements) + len(eq_elements) - 2,
                  right_limits[idx]))
 
@@ -105,10 +134,16 @@ def visualize_my_sort(
 
 
 class SortThread(QThread):
+    """
+    Thread class
+    """
     step_signal = pyqtSignal(tuple, tuple, tuple, list, list)
     finished_signal = pyqtSignal()
 
     def __init__(self, array: list, delay: float, reverse: bool):
+        """
+        Init class
+        """
         super().__init__()
         self.array = array
         self.new_array = array[:]
@@ -119,35 +154,55 @@ class SortThread(QThread):
 
         self._resume = threading.Event()
         self._resume.set()
-        self._frame_done = threading.Event() 
+        self._frame_done = threading.Event()
         self._frame_done.set()
 
     @property
     def is_paused(self) -> bool:
+        """
+        Get pause property
+        """
         return not self._resume.is_set()
 
     def pause(self):
+        """
+        Pause sorting
+        """
         self._resume.clear()
 
     def resume(self):
+        """
+        Resume sorting
+        """
         self._resume.set()
 
     def stop(self):
+        """
+        Stop sorting
+        """
         self.requestInterruption()
         self._resume.set()
         self._frame_done.set()
 
     def frame_done(self):
+        """
+        Frane done
+        """
         self._frame_done.set()
 
     def _wait(self, event: threading.Event) -> bool:
-        """Ждёт событие; False, если запросили остановку."""
+        """
+        Waiting for an event; False if a stop was requested
+        """
         while not event.wait(0.05):
             if self.isInterruptionRequested():
                 return False
         return not self.isInterruptionRequested()
 
     def run(self):
+        """
+        Run thread
+        """
         idof = 0
         element_counter = 0
         current_pivot = ()
@@ -190,7 +245,7 @@ class SortThread(QThread):
                     or element_counter % self.stride == 0):
                 continue
 
-            if not self._wait(self._frame_done): 
+            if not self._wait(self._frame_done):
                 return
             self._frame_done.clear()
             self.step_signal.emit(current_highlight, current_pivot,
@@ -202,8 +257,13 @@ class SortThread(QThread):
 
 
 class SortVisualizerWidget(QWidget):
-    """Виджет с двумя графиками."""
+    """
+    Widget with two graphs
+    """
     def __init__(self, parent=None):
+        """
+        Init class
+        """
         super().__init__(parent)
 
         self.figure = Figure(figsize=(8, 6), dpi=100)
@@ -216,6 +276,9 @@ class SortVisualizerWidget(QWidget):
         layout.addWidget(self.canvas)
 
     def update_size(self, min_val: int, max_val: int, arr_len: int):
+        """
+        Update size function
+        """
         self._arr_len = arr_len
         self._min_val = min_val
         self._max_val = max_val
@@ -237,10 +300,12 @@ class SortVisualizerWidget(QWidget):
 
     @staticmethod
     def _apply(bars, heights, colors, cache):
-        """Меняет только те столбцы, которые изменились."""
+        """
+        It only changes the columns that have changed
+        """
         for i, rect in enumerate(bars):
             h = heights[i] if i < len(heights) else 0
-            c = colors[i] if i < len(colors) else 'lightgray'
+            c = colors[i] if i < len(colors) else Colors.LIGHT_GRAY.value
             if cache[i] != (h, c):
                 rect.set_height(h)
                 rect.set_facecolor(c)
@@ -248,7 +313,10 @@ class SortVisualizerWidget(QWidget):
 
     def update_plot(self, current_highlight: tuple, current_pivot: tuple,
                     current_offset: tuple, top_array: list, bottom_array: list):
-        top_colors = ['skyblue'] * len(top_array)
+        """
+        Updating graphics
+        """
+        top_colors = [Colors.SKY_BLUE.value] * len(top_array)
         if current_highlight:
             h_idx, h_type = current_highlight
             if 0 <= h_idx < len(top_colors):
@@ -259,14 +327,14 @@ class SortVisualizerWidget(QWidget):
                 top_colors[p_idx] = p_type.value
 
         display_bottom = [0 if x is None else x for x in bottom_array]
-        bottom_colors = ['lightgray'] * len(display_bottom)
+        bottom_colors = [Colors.LIGHT_GRAY.value] * len(display_bottom)
         if current_offset:
             value, group_type, _, __ = current_offset
-            color = {OffsetTypes.LOW: 'blue',
-                     OffsetTypes.CENTER: 'orange',
-                     OffsetTypes.HIGH: 'purple'}[group_type]
+            color = {OffsetTypes.LOW: Colors.BLUE.value,
+                     OffsetTypes.CENTER: Colors.ORANGE.value,
+                     OffsetTypes.HIGH: Colors.PURPLE.value}[group_type]
             for i, x in enumerate(display_bottom):
-                if x == value and bottom_colors[i] == 'lightgray':
+                if x == value and bottom_colors[i] == Colors.LIGHT_GRAY.value:
                     bottom_colors[i] = color
                     break
 
@@ -277,6 +345,9 @@ class SortVisualizerWidget(QWidget):
 
 
 class MainWindow(QMainWindow):
+    """
+    Main window of program
+    """
     MAX_ARRAY_SIZE = 1000
     MIN_RANGE = -10000
     MAX_RANGE = 10000
@@ -285,17 +356,17 @@ class MainWindow(QMainWindow):
     BASE_DELAY = 4
 
     def __init__(self):
+        """
+        Init class
+        """
         super().__init__()
         self.sort_thread = None
-        self._create_ui()
-        self.restart_sorting()
 
-    def _create_ui(self):
         self.setWindowTitle("Sorting array")
-        main_layout = QVBoxLayout()
-        
+        self._main_layout = QVBoxLayout()
+
         self.matplotlib_widget = SortVisualizerWidget()
-        main_layout.addWidget(self.matplotlib_widget)
+        self._main_layout.addWidget(self.matplotlib_widget)
 
         min_range_label = QLabel("Minimum possible value:")
         self.min_range = QSpinBox()
@@ -305,7 +376,7 @@ class MainWindow(QMainWindow):
         min_layout = QHBoxLayout()
         min_layout.addWidget(min_range_label)
         min_layout.addWidget(self.min_range)
-        main_layout.addLayout(min_layout)
+        self._main_layout.addLayout(min_layout)
 
         max_range_label = QLabel("Maximum possible value:")
         self.max_range = QSpinBox()
@@ -315,7 +386,7 @@ class MainWindow(QMainWindow):
         max_layout = QHBoxLayout()
         max_layout.addWidget(max_range_label)
         max_layout.addWidget(self.max_range)
-        main_layout.addLayout(max_layout)
+        self._main_layout.addLayout(max_layout)
 
         array_size_label = QLabel("Array size:")
         self.array_size = QSpinBox(self)
@@ -325,7 +396,7 @@ class MainWindow(QMainWindow):
         array_size_layout = QHBoxLayout()
         array_size_layout.addWidget(array_size_label)
         array_size_layout.addWidget(self.array_size)
-        main_layout.addLayout(array_size_layout)
+        self._main_layout.addLayout(array_size_layout)
 
         speed_label = QLabel("Speed:")
         self.speed_edit = QSpinBox(self)
@@ -335,10 +406,10 @@ class MainWindow(QMainWindow):
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(speed_label)
         speed_layout.addWidget(self.speed_edit)
-        main_layout.addLayout(speed_layout)
+        self._main_layout.addLayout(speed_layout)
 
         self.reverse = QCheckBox("Sorting in reverse order")
-        main_layout.addWidget(self.reverse)
+        self._main_layout.addWidget(self.reverse)
 
         self.start_button = QPushButton("start", self)
         self.start_button.clicked.connect(self.start_sorting)
@@ -346,19 +417,24 @@ class MainWindow(QMainWindow):
         self.pause_button.clicked.connect(self.toggle_pause)
         self.restart_button = QPushButton("restart", self)
         self.restart_button.clicked.connect(self.restart_sorting)
-        
+
         buttons_layout = QHBoxLayout()
         buttons_layout.addWidget(self.start_button)
         buttons_layout.addWidget(self.pause_button)
         buttons_layout.addWidget(self.restart_button)
         self.pause_button.setEnabled(False)
-        main_layout.addLayout(buttons_layout)
+        self._main_layout.addLayout(buttons_layout)
 
         central_widget = QWidget()
-        central_widget.setLayout(main_layout)
+        central_widget.setLayout(self._main_layout)
         self.setCentralWidget(central_widget)
 
+        self.restart_sorting()
+
     def start_sorting(self):
+        """
+        Start sorting
+        """
         self._stop_thread()
         self.sort_thread = SortThread(
             self.original_array, delay=self.BASE_DELAY / self.speed,
@@ -371,8 +447,12 @@ class MainWindow(QMainWindow):
         self.pause_button.setEnabled(True)
         self.pause_button.setText("Pause")
 
-    def on_step(self, current_highlight, current_pivot, current_offset,
-                current_state_up, current_state_down):
+    def on_step(self, current_highlight: tuple, current_pivot: tuple,
+                current_offset: tuple, current_state_up: list[int],
+                current_state_down: list[int]):
+        """
+        Step function
+        """
         self.matplotlib_widget.update_plot(
             current_highlight, current_pivot, current_offset,
             current_state_up, current_state_down)
@@ -380,11 +460,17 @@ class MainWindow(QMainWindow):
             self.sort_thread.frame_done()
 
     def on_finished(self):
+        """
+        Finish process of visualizate sorting
+        """
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
         self.pause_button.setText("Pause")
 
     def toggle_pause(self):
+        """
+        Toggle pause(continue) state
+        """
         t = self.sort_thread
         if not t or not t.isRunning():
             return
@@ -396,6 +482,9 @@ class MainWindow(QMainWindow):
             self.pause_button.setText("Resume")
 
     def _stop_thread(self):
+        """
+        Stop thread
+        """
         t = self.sort_thread
         if t is None:
             return
@@ -409,6 +498,9 @@ class MainWindow(QMainWindow):
         self.sort_thread = None
 
     def stop_sorting(self):
+        """
+        Stop array sorting
+        """
         self.sort_thread.is_stopped = True
         self.sort_thread.is_paused = False
 
@@ -416,6 +508,9 @@ class MainWindow(QMainWindow):
         self.pause_button.setEnabled(False)
 
     def restart_sorting(self):
+        """
+        Restarting sort (generate new array)
+        """
         self._stop_thread()
         self.original_array = [
             randint(self.min_val, self.max_val) for _ in range(self.size_val)]
@@ -428,27 +523,45 @@ class MainWindow(QMainWindow):
         self.pause_button.setText("Pause")
 
     def closeEvent(self, event):
+        """
+        Close event from MainWindow
+        """
         self._stop_thread()
         super().closeEvent(event)
 
     @property
     def speed(self):
+        """
+        Return speed from QSpinBox
+        """
         return self.speed_edit.value()
 
     @property
     def min_val(self):
+        """
+        Return min range from QSpinBox
+        """
         return self.min_range.value()
 
     @property
     def max_val(self):
+        """
+        Return max range from QSpinBox
+        """
         return self.max_range.value()
 
     @property
     def is_reverse(self):
+        """
+        Return is reverse order from Checkbox
+        """
         return self.reverse.isChecked()
 
     @property
     def size_val(self):
+        """
+        Return array size from QSpinBox
+        """
         return self.array_size.value()
 
 

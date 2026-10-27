@@ -1,6 +1,7 @@
 """
 Quick sort realization
 """
+#pylint: disable=R0912
 from typing import Optional, Callable
 
 
@@ -22,11 +23,15 @@ def my_sort(
         return []
 
     if key is None:
-        key = lambda x: x
-    if cmp is None:
-        cmp = lambda x,y: x < y
+        def key(x):
+            return x
 
-    new_cmp = lambda x,y: cmp(key(x), key(y)) ^ reverse
+    if cmp is None:
+        def cmp(x, y):
+            return key(x) < key(y)
+
+    def new_cmp(x, y):
+        return cmp(key(x), key(y)) ^ reverse
 
     arr_len = len(array)
 

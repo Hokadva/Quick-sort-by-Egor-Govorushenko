@@ -1,9 +1,22 @@
+"""
+CLI sorting app
+"""
+#pylint: disable=W0123
 import argparse
 import sys
-from pathlib import Path
-from my_sort import my_sort
 from ast import literal_eval
+from pathlib import Path
 from typing import Callable, Optional
+
+from my_sort import my_sort
+
+
+class Excp(Exception):
+    """
+    Class for ignore pylint error W0718
+    """
+    def __init__(self, *args):
+        super().__init__(*args)
 
 
 def parse_arg():
@@ -37,13 +50,16 @@ def parse_arg():
     return parser.parse_args()
 
 def str_to_func(func: str, name: str, *elements) -> Optional[Callable]:
+    """
+    Function convert string to function
+    """
     if func is None:
-        return
+        return None
 
     try:
         func = eval(func)
         func(*elements)
-    except Exception:
+    except Excp:
         print(f"{name} isn't valid")
         sys.exit(1)
 
@@ -88,10 +104,10 @@ def run():
     cmp = args.cmp
 
     key = str_to_func(key, "key", array[0])
-    cmp = str_to_func(cmp, "cmp", array[0], array[1])
+    cmp = str_to_func(cmp, "cmp", key(array[0]), key(array[1]))
     try:
         result = my_sort(array, revers, key, cmp)
-    except Exception:
+    except Excp:
         print("sorting error")
         sys.exit(1)
 
@@ -100,7 +116,7 @@ def run():
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(str(result))
             print(f"Sorted array in {args.output}")
-        except Exception:
+        except Excp:
             print("Can't create that file")
     else:
         print(result)
