@@ -28,7 +28,7 @@ def my_sort(
 
     if cmp is None:
         def cmp(x, y):
-            return key(x) < key(y)
+            return x < y
 
     def new_cmp(x, y):
         return cmp(key(x), key(y)) ^ reverse

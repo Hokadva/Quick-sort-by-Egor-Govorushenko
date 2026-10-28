@@ -25,6 +25,7 @@ venv
 !readme.md
 *.spec
 !build.spec
+.pytest_cache
 
 modules/engine/ffmpeg/
 modules/engine/ffmpeg.zip

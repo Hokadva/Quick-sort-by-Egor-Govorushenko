@@ -67,7 +67,6 @@ def visualize_my_sort(
 
     if (arr_len < MIN_ARRAY_SIZE or
         arr_len <= NUM_OF_MEDIAN_CANDIDATES or NUM_OF_MEDIAN_CANDIDATES == 1):
-        pivot = array[arr_len // 2]
         pivot_idx = arr_len // 2
         pivot = array[pivot_idx]
         current_highlight.append((pivot_idx + offset, HighlightTypes.PIVOT))
@@ -78,6 +77,8 @@ def visualize_my_sort(
             (idx + offset, HighlightTypes.CANDIDATE)
             for idx in range(len(candidates))]
 
+        pivot_idx = None
+
         for pivot in candidates:
             counter = 0
             for el in candidates:
@@ -87,6 +88,10 @@ def visualize_my_sort(
             if counter == NUM_OF_MEDIAN_CANDIDATES // 2:
                 pivot_idx = array.index(pivot)
                 break
+
+        if pivot_idx is None:
+            pivot_idx = arr_len // 2
+            pivot = array[pivot_idx]
 
         current_highlight.append((pivot_idx + offset, HighlightTypes.PIVOT))
 
@@ -512,8 +517,9 @@ class MainWindow(QMainWindow):
         Restarting sort (generate new array)
         """
         self._stop_thread()
-        self.original_array = [
-            randint(self.min_val, self.max_val) for _ in range(self.size_val)]
+        '''self.original_array = [
+            randint(self.min_val, self.max_val) for _ in range(self.size_val)]'''
+        self.original_array = [100 for _ in range(1000)]
         self.matplotlib_widget.update_size(
             self.min_val, self.max_val, self.size_val)
         self.matplotlib_widget.update_plot(

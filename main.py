@@ -49,12 +49,25 @@ def parse_arg():
     )
     return parser.parse_args()
 
+def base_key(x):
+    return x
+
+def base_cmp(x, y):
+    return x <= y
+
+
+FUNCS = {
+    "key": base_key,
+    "cmp": base_cmp
+}
+
+
 def str_to_func(func: str, name: str, *elements) -> Optional[Callable]:
     """
     Function convert string to function
     """
     if func is None:
-        return None
+        return FUNCS[name]
 
     try:
         func = eval(func)
@@ -95,16 +108,18 @@ def run():
         print("Incorrent array format.")
         sys.exit(1)
 
-    if len(array) < 2:
-        print(array)
-        sys.exit(0)
-
     revers = args.reversed
     key = args.key
     cmp = args.cmp
 
-    key = str_to_func(key, "key", array[0])
-    cmp = str_to_func(cmp, "cmp", key(array[0]), key(array[1]))
+    if len(array) > 1:
+        key = str_to_func(key, "key", array[0])
+        cmp = str_to_func(cmp, "cmp", key(array[0]), key(array[1]))
+
+    else:
+        key = base_key
+        cmp = base_cmp
+
     try:
         result = my_sort(array, revers, key, cmp)
     except Excp:
