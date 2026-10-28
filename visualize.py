@@ -517,9 +517,8 @@ class MainWindow(QMainWindow):
         Restarting sort (generate new array)
         """
         self._stop_thread()
-        '''self.original_array = [
-            randint(self.min_val, self.max_val) for _ in range(self.size_val)]'''
-        self.original_array = [100 for _ in range(1000)]
+        self.original_array = [
+            randint(self.min_val, self.max_val) for _ in range(self.size_val)]
         self.matplotlib_widget.update_size(
             self.min_val, self.max_val, self.size_val)
         self.matplotlib_widget.update_plot(

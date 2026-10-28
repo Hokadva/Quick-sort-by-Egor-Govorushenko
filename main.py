@@ -50,9 +50,15 @@ def parse_arg():
     return parser.parse_args()
 
 def base_key(x):
+    """
+    Default key
+    """
     return x
 
 def base_cmp(x, y):
+    """
+    Default cmp
+    """
     return x <= y
 
 
